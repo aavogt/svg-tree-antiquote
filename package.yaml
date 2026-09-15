@@ -1,0 +1,14 @@
+name: svg-tree-qq
+
+default-extensions:
+  - QuasiQuotes
+  - TemplateHaskell
+
+dependencies:
+  - base
+  - BNFC-meta
+  - svg-tree
+
+library:
+  source-dirs:
+    - lib
