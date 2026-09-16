@@ -1,13 +1,18 @@
-name: svg-tree-qq
+name: svg-tree-antiquote
+
+license: GPL
 
 default-extensions:
   - QuasiQuotes
   - TemplateHaskell
+  - LambdaCase
 
 dependencies:
   - base
   - BNFC-meta
   - svg-tree
+  - template-haskell
+  - linear
 
 library:
   source-dirs:
