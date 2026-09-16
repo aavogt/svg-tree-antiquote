@@ -12,4 +12,4 @@ parsePathCommands :: String -- ^ https://developer.mozilla.org/en-US/docs/Web/SV
 
 parse [svg path commands](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d#path_commands) into [svg-tree](https://hackage-content.haskell.org/package/svg-tree-0.6.2.4/docs/Graphics-Svg-Types.html#t:PathCommand)
 
-used by https://github.com/aavogt/rapids/rapids-svg
+used by https://github.com/aavogt/rapids/tree/main/rapids-svg
