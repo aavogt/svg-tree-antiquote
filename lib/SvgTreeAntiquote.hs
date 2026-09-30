@@ -75,18 +75,18 @@ separator CArg "";
 separator HArg "";
 
 
-EDouble.E3 ::= Double;
-EInt. E3 ::= Integer;
-EVar. E3 ::= Ident [E];
-EOp . E2 ::= E3 Op3 E2;
-EOp . E1  ::= E1 Op2 E2;
-EOp . E  ::= E Op E1;
-ENeg. E  ::= "-" E;
+EDouble.E4 ::= Double;
+EInt. E4 ::= Integer;
+EVar. E4 ::= Ident [E1];
+EOp . E3 ::= E4 Op3 E3;
+EOp . E2  ::= E2 Op2 E3;
+EOp . E1  ::= E1 Op E2;
+ENeg. E  ::= "-" E1;
 
 BV.B ::= Ident;
 BI.B ::= Integer;
 
-separator E "";
+separator E1 "";
 
 EPlus. Op ::= "+";
 EMinus. Op ::= "-";
@@ -97,7 +97,8 @@ EPow. Op3 ::= "^";
 EPow. Op3 ::= "^^";
 
 
-_. E3 ::= "(" E ")" ;
+_. E4 ::= "(" E ")" ;
+_. E3 ::= E4 ;
 _. E2 ::= E3 ;
 _. E1 ::= E2 ;
 _. E  ::= E1 ;
