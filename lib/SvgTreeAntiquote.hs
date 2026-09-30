@@ -78,6 +78,18 @@ separator HArg "";
 EDouble.E4 ::= Double;
 EInt. E4 ::= Integer;
 EVar. E4 ::= Ident [E1];
+-- Command letters are lexed as literal tokens, not Ident, when used as variables.
+-- Give those tokens expression constructors so single-letter variables still parse.
+EVa. E4 ::= "a";
+EVt. E4 ::= "t";
+EVl. E4 ::= "l";
+EVq. E4 ::= "q";
+EVs. E4 ::= "s";
+EVc. E4 ::= "c";
+EVh. E4 ::= "h";
+EVv. E4 ::= "v";
+EVm. E4 ::= "m";
+EVz. E4 ::= "z";
 EOp . E3 ::= E4 Op3 E3;
 EOp . E2  ::= E2 Op2 E3;
 EOp . E1  ::= E1 Op E2;
@@ -155,6 +167,16 @@ toExp = \case
   EDouble d -> [|d|]
   EInt i -> [|fromIntegral i|]
   EVar (Ident a) b -> appsE (dyn a : map toExp b)
+  EVa -> dyn "a"
+  EVt -> dyn "t"
+  EVl -> dyn "l"
+  EVq -> dyn "q"
+  EVs -> dyn "s"
+  EVc -> dyn "c"
+  EVh -> dyn "h"
+  EVv -> dyn "v"
+  EVm -> dyn "m"
+  EVz -> dyn "z"
   ENeg e -> [| - $(toExp e) |]
   EOp a op b -> liftOp op (toExp a) (toExp b)
 
