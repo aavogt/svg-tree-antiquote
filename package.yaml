@@ -6,6 +6,8 @@ default-extensions:
   - QuasiQuotes
   - TemplateHaskell
   - LambdaCase
+  - ImplicitParams
+  - NoMonomorphismRestriction
 
 dependencies:
   - base

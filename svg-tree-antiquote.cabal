@@ -20,6 +20,8 @@ library
       QuasiQuotes
       TemplateHaskell
       LambdaCase
+      ImplicitParams
+      NoMonomorphismRestriction
   build-depends:
       BNFC-meta
     , base

@@ -32,6 +32,9 @@ import Language.LBNF
 import Language.LBNF.Runtime (err)
 import Linear (V2 (V2))
 import Prelude hiding (exp)
+import Language.Haskell.TH.Syntax (lookupValueName)
+import Data.Maybe ( catMaybes, fromMaybe )
+import Data.List ( groupBy, stripPrefix )
 
 bnfc
   [lbnf|
@@ -78,18 +81,6 @@ separator HArg "";
 EDouble.E4 ::= Double;
 EInt. E4 ::= Integer;
 EVar. E4 ::= Ident [E1];
--- Command letters are lexed as literal tokens, not Ident, when used as variables.
--- Give those tokens expression constructors so single-letter variables still parse.
-EVa. E4 ::= "a";
-EVt. E4 ::= "t";
-EVl. E4 ::= "l";
-EVq. E4 ::= "q";
-EVs. E4 ::= "s";
-EVc. E4 ::= "c";
-EVh. E4 ::= "h";
-EVv. E4 ::= "v";
-EVm. E4 ::= "m";
-EVz. E4 ::= "z";
 EOp . E3 ::= E4 Op3 E3;
 EOp . E2  ::= E2 Op2 E3;
 EOp . E1  ::= E1 Op E2;
@@ -120,15 +111,58 @@ _. E  ::= E1 ;
 -- | Parse svg path commands into svg-tree's 'PathCommand',
 -- supporting arithmetic @+ - * / ** ( )@ with haskell-like fixity
 --
+-- @
 -- ghci> let x = 7; y = 3 in $(parsePathCommands "v -x**2 h y")
 -- [VerticalTo OriginRelative [-49.0],HorizontalTo OriginRelative [3.0]]
+-- @
+--
+-- Single-letter variables (@atlqschvmz@) are supported: when in-scope
+-- ('lookupValueName' won't find declarations after) tokens after the first are
+-- mangled and unmangled for the lbnfc parser. In the following example the
+-- absolute @T@-command can be rewritten as a relative @t@-command, without
+-- interfering with the @t@-variables
+--
+-- >T t,t
+-- >T 0,0
+-- >T
+-- > t,t
+--
+-- @
+-- ghci> let t = 2 in $(parsePathCommands "t t,t\nt 0,0\nt\n t,t")
+-- >[SmoothQuadraticBezierCurveTo OriginRelative [V2 2.0 2.0]
+-- >,SmoothQuadraticBezierCurveTo OriginRelative [V2 0.0 0.0]
+-- >,SmoothQuadraticBezierCurveTo OriginRelative [V2 2.0 2.0]]
+-- @
 parsePathCommands :: String -- ^ https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d#path_commands
   -> ExpQ -- ^ ['PathCommand']
-parsePathCommands input = case pCmds (myLexer input) of
-  Ok (Cmds s) -> listE (map toPC s)
-  Bad msg -> reportError msg >> [|()|]
+parsePathCommands input = do
+  (mangle,unmangle) <- mangleUnmangle
+  let ?unmangle = unmangle
+  case pCmds $ applyMangle mangle $ myLexer input of
+    Ok (Cmds s) -> listE (map toPC s)
+    Bad msg -> reportError msg >> [|()|]
 
-toPC :: Cmd -> ExpQ
+-- | hanging indent
+applyMangle :: (Token -> Token) -> [Token] -> [Token]
+applyMangle f ts = concatMap (mapTail f) $ groupBy sameLineOrIndented ts
+
+sameLineOrIndented (PT (Pn _ x i) _) (PT (Pn _ y j) _) = x == y || j > i
+sameLineOrIndented _ _ = False
+
+mapTail f (x:xs) = x : map f xs
+mapTail _ [] = []
+
+-- | add a (hopefully) unique prefix
+mangleUnmangle :: Q (Token -> Token, String -> String)
+mangleUnmangle = do
+  let prefix = "oOoOoO"
+  ns <- catMaybes <$> sequence [ lookupValueName n <&> fmap (const n)
+   | n <- ["a","t","l","q","s","c","h","v","m","z"]]
+  return (\case
+    PT p (TS n@[_] _) | n `elem` ns -> PT p (TV (prefix ++ n))
+    x -> x
+   , \mangled -> fromMaybe mangled $ stripPrefix prefix mangled)
+
 toPC = \case
   Ca args -> [|EllipticalArc OriginRelative $(toAArgs args)|]
   CA args -> [|EllipticalArc OriginAbsolute $(toAArgs args)|]
@@ -150,33 +184,18 @@ toPC = \case
   CM args -> [|MoveTo OriginAbsolute $(toMArgs args)|]
   CZ -> [|EndPath|]
 
-toHArgs :: [HArg] -> Q Exp
 toHArgs = listE . map toCoord
 
-toMArgs :: [MArg] -> Q Exp
 toMArgs = listE . map toV2
 
-toV2 :: MArg -> ExpQ
 toV2 (MArg x y) = [|V2 $(toExp x) $(toExp y)|]
 
-toCoord :: HArg -> ExpQ
 toCoord (HArg x) = toExp x
 
-toExp :: E -> ExpQ
 toExp = \case
   EDouble d -> [|d|]
   EInt i -> [|fromIntegral i|]
-  EVar (Ident a) b -> appsE (dyn a : map toExp b)
-  EVa -> dyn "a"
-  EVt -> dyn "t"
-  EVl -> dyn "l"
-  EVq -> dyn "q"
-  EVs -> dyn "s"
-  EVc -> dyn "c"
-  EVh -> dyn "h"
-  EVv -> dyn "v"
-  EVm -> dyn "m"
-  EVz -> dyn "z"
+  EVar (Ident a) b -> appsE (dyn (?unmangle a) : map toExp b)
   ENeg e -> [| - $(toExp e) |]
   EOp a op b -> liftOp op (toExp a) (toExp b)
 
@@ -188,19 +207,14 @@ liftOp op a b = case op of
   EDiv -> [| $a / $b |]
   EPow -> [| $a ** $b |]
 
-toQArgs :: [QArg] -> Q Exp
 toQArgs = listE . map toQArg
 
-toQArg :: QArg -> ExpQ
 toQArg (QArg a b) = tupE [toV2 a, toV2 b]
 
-toCArgs :: [CArg] -> ExpQ
 toCArgs = listE . map toCArg
 
-toCArg :: CArg -> ExpQ
 toCArg (CArg a b c) = tupE [toV2 a, toV2 b, toV2 c]
 
-toAArg :: AArg -> ExpQ
 toAArg (AArg rx ry rot large sweep xy) =
   tupE
     [ toExp rx,
@@ -211,12 +225,10 @@ toAArg (AArg rx ry rot large sweep xy) =
       toV2 xy
     ]
 
-toExpB :: B -> ExpQ
 toExpB = \case
-  BV (Ident b) -> dyn b
+  BV (Ident b) -> dyn (?unmangle b)
   BI n
     | n == 1 -> [| True |]
     | n == 0 -> [| False |]
 
-toAArgs :: [AArg] -> ExpQ
 toAArgs = listE . map toAArg
