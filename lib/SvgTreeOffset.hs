@@ -30,9 +30,9 @@ pathOutline tolerance input
   | null widthGroups = rights input
   | otherwise =
       let rawSubpaths = decodePath tolerance input
-          vertexCount = sum (map (length . subpathPoints) rawSubpaths)
-          (radii, unusedWidths) = assignWidthGroups vertexCount widthGroups
-          sized = attachRadii rawSubpaths radii
+          scopeRadii = assignScopeRadii rawSubpaths widthGroups
+          unusedWidths = sum [unused | (_, _, unused) <- scopeRadii]
+          sized = attachRadii rawSubpaths scopeRadii
           result = concatMap (uncurry outlineSubpath) sized
           warnings = widthWarnings ++
             [ "pathOutline: unused width arguments in a width event"
@@ -51,7 +51,8 @@ finite x = not (isNaN x || isInfinite x)
 
 type WidthPair = (Coord, Coord)
 data WidthGroup = WidthGroup
-  { widthGroupVertex :: !Int
+  { widthGroupScope :: !Int
+  , widthGroupVertex :: !Int
   , widthGroupHasAnchor :: !Bool
   , widthGroupValues :: ![WidthPair]
   }
@@ -65,7 +66,8 @@ data PathPoint = PathPoint !RPoint ![RPoint]
   -- The extra points are flattened samples between the previous and this point.
 
 data Subpath = Subpath
-  { subpathPoints :: ![PathPoint]
+  { subpathScope :: !Int
+  , subpathPoints :: ![PathPoint]
   , subpathClosed :: !Bool
   }
 
@@ -74,6 +76,7 @@ data DecodeState = DecodeState
   , subpathStart :: !(Maybe RPoint)
   , activePointsRev :: ![PathPoint]
   , completedRev :: ![Subpath]
+  , activeScope :: !Int
   , previousCubicControl :: !(Maybe RPoint)
   , previousQuadraticControl :: !(Maybe RPoint)
   , previousCurveKind :: !CurveKind
@@ -88,6 +91,7 @@ initialDecodeState = DecodeState
   , subpathStart = Nothing
   , activePointsRev = []
   , completedRev = []
+  , activeScope = 0
   , previousCubicControl = Nothing
   , previousQuadraticControl = Nothing
   , previousCurveKind = NoCurve
@@ -95,56 +99,59 @@ initialDecodeState = DecodeState
 
 collectWidths :: [Either Supplement PathCommand] -> ([WidthGroup], [String])
 collectWidths input =
-  let (groupsRev, _, _, _, warningsRev, _, _) =
-        foldl' step ([], (0, 0), [], False, [], 0, False) input
+  let (groupsRev, _, _, _, warningsRev, _, _, _, _) =
+        foldl' step ([], (0, 0), [], False, [], 0, False, 0, 1) input
   in (reverse groupsRev, reverse warningsRev)
   where
-    step (groups, current, penStack, pending, warnings, vertexIndex, active) command = case command of
+    step (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope) command = case command of
       Right pathCommand ->
         let (nextIndex, nextActive) = advancePathCursor vertexIndex active pathCommand
-        in (groups, current, penStack, False, warnings, nextIndex, nextActive)
+        in (groups, current, penStack, False, warnings, nextIndex, nextActive, scope, nextScope)
       Left (SWidth args) ->
-        addArgs False args groups current penStack pending warnings vertexIndex active
+        addArgs False args groups current penStack pending warnings vertexIndex active scope nextScope
       Left (Swidth args) ->
-        addArgs True args groups current penStack pending warnings vertexIndex active
+        addArgs True args groups current penStack pending warnings vertexIndex active scope nextScope
       Left (SJoin args) ->
-        warnJoin args groups current penStack pending warnings vertexIndex active
+        warnJoin args groups current penStack pending warnings vertexIndex active scope nextScope
       Left (Sjoin args) ->
-        warnJoin args groups current penStack pending warnings vertexIndex active
+        warnJoin args groups current penStack pending warnings vertexIndex active scope nextScope
       Left SOpen ->
-        (groups, current, current : penStack, pending, warnings, vertexIndex, active)
+        (groups, current, (current, vertexIndex, active, scope) : penStack,
+          pending, warnings, 1, True, nextScope, nextScope + 1)
       Left SClose -> case penStack of
-        saved : rest -> (groups, saved, rest, pending, warnings, vertexIndex, active)
-        [] -> (groups, current, penStack, pending, warnings, vertexIndex, active)
+        (savedCurrent, savedIndex, savedActive, savedScope) : rest ->
+          (groups, savedCurrent, rest, pending, warnings, savedIndex, savedActive, savedScope, nextScope)
+        [] -> (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
 
-    warnJoin [] groups current penStack pending warnings vertexIndex active =
-      (groups, current, penStack, pending, warnings, vertexIndex, active)
-    warnJoin _ groups current penStack pending warnings vertexIndex active =
+    warnJoin [] groups current penStack pending warnings vertexIndex active scope nextScope =
+      (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
+    warnJoin _ groups current penStack pending warnings vertexIndex active scope nextScope =
       (groups, current, penStack, pending, "pathOutline: j/J join flags are ignored" : warnings,
-        vertexIndex, active)
+        vertexIndex, active, scope, nextScope)
 
-    addArgs _ [] groups current penStack pending warnings vertexIndex active =
-      (groups, current, penStack, pending, warnings, vertexIndex, active)
-    addArgs relative args groups current penStack pending warnings vertexIndex active =
+    addArgs _ [] groups current penStack pending warnings vertexIndex active scope nextScope =
+      (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
+    addArgs relative args groups current penStack pending warnings vertexIndex active scope nextScope =
       let warning =
             [ "pathOutline: consecutive w/W commands add to a pending width group"
             | pending
             ]
           (resolvedRev, current') = foldl' addOne ([], current) args
           anchor = active && vertexIndex > 0
-          groups' = appendWidthGroup vertexIndex anchor (reverse resolvedRev) groups
-      in (groups', current', penStack, True, reverse warning ++ warnings, vertexIndex, active)
+          groups' = appendWidthGroup scope vertexIndex anchor (reverse resolvedRev) groups
+      in (groups', current', penStack, True, reverse warning ++ warnings,
+          vertexIndex, active, scope, nextScope)
       where
         addOne (acc, previous) arg =
           let value = widthPair arg
               next = if relative then addPair previous value else value
           in (next : acc, next)
 
-    appendWidthGroup index anchor values groups = case groups of
-      WidthGroup previousIndex previousAnchor previousValues : rest
-        | previousIndex == index && previousAnchor == anchor ->
-            WidthGroup index anchor (previousValues ++ values) : rest
-      _ -> WidthGroup index anchor values : groups
+    appendWidthGroup scope index anchor values groups = case groups of
+      WidthGroup previousScope previousIndex previousAnchor previousValues : rest
+        | previousScope == scope && previousIndex == index && previousAnchor == anchor ->
+            WidthGroup scope index anchor (previousValues ++ values) : rest
+      _ -> WidthGroup scope index anchor values : groups
 
 widthPair :: WArg -> WidthPair
 widthPair (W1 radius) = (radius, radius)
@@ -223,11 +230,36 @@ assignRadii vertexCount widths = go vertexCount (length widths) widths (0, 0)
 sameRadii :: WidthPair -> VertexRadii
 sameRadii (left, right) = VertexRadii left right left right
 
-attachRadii :: [Subpath] -> [VertexRadii] -> [([Vertex], Bool)]
-attachRadii [] _ = []
-attachRadii (Subpath points closed : rest) radii =
-  let (here, later) = splitAt (length points) radii
-  in (sizePoints points here, closed) : attachRadii rest later
+assignScopeRadii :: [Subpath] -> [WidthGroup] -> [(Int, [VertexRadii], Int)]
+assignScopeRadii subpaths groups = foldl' assign [] scopes
+  where
+    scopes = map subpathScope subpaths ++ map widthGroupScope groups
+    assign assigned scope
+      | any ((== scope) . firstOfThree) assigned = assigned
+      | otherwise =
+          let vertexCount = sum
+                [ length points
+                | Subpath pathScope points _ <- subpaths
+                , pathScope == scope
+                ]
+              (radii, unused) = assignWidthGroups vertexCount
+                (filter ((== scope) . widthGroupScope) groups)
+          in (scope, radii, unused) : assigned
+    firstOfThree (scope, _, _) = scope
+
+attachRadii :: [Subpath] -> [(Int, [VertexRadii], Int)] -> [([Vertex], Bool)]
+attachRadii subpaths scopedRadii = go [] subpaths
+  where
+    go _ [] = []
+    go offsets (Subpath scope points closed : rest) =
+      let radii = case [values | (candidate, values, _) <- scopedRadii, candidate == scope] of
+            values : _ -> values
+            [] -> []
+          offset = maybe 0 id (lookup scope offsets)
+          (_, afterOffset) = splitAt offset radii
+          (here, _) = splitAt (length points) afterOffset
+          nextOffsets = (scope, offset + length points) : filter ((/= scope) . fst) offsets
+      in (sizePoints points here, closed) : go nextOffsets rest
 
 sizePoints :: [PathPoint] -> [VertexRadii] -> [Vertex]
 sizePoints [] _ = []
@@ -433,29 +465,31 @@ unitNormal (V2 x y)
 
 decodePath :: Double -> [Either Supplement PathCommand] -> [Subpath]
 decodePath tolerance commands =
-  let (finalState, stack) = foldl' step (initialDecodeState, []) commands
+  let (finalState, stack, _) = foldl' step (initialDecodeState, [], 1) commands
       finished = finishScopes finalState stack
   in reverse (completedRev finished)
   where
-    step (state, stack) command = case command of
-      Right pathCommand -> (decodeCommand tolerance state pathCommand, stack)
+    step (state, stack, nextScope) command = case command of
+      Right pathCommand -> (decodeCommand tolerance state pathCommand, stack, nextScope)
       Left SOpen ->
         let branchState = clearControls (state
               { subpathStart = Nothing
               , activePointsRev = []
+              , activeScope = nextScope
               })
-        in (branchState, state : stack)
+        in (branchState, state : stack, nextScope + 1)
       Left SClose -> case stack of
         saved : rest ->
           let branchFinished = finishActive False state
-          in (saved { completedRev = completedRev branchFinished }, rest)
-        [] -> (state, stack)
-      Left _ -> (state, stack)
+          in (saved { completedRev = completedRev branchFinished }, rest, nextScope)
+        [] -> (state, stack, nextScope)
+      Left _ -> (state, stack, nextScope)
 
     finishScopes state [] = finishActive False state
     finishScopes state (saved : rest) =
       let branchFinished = finishActive False state
       in finishScopes (saved { completedRev = completedRev branchFinished }) rest
+
 
 decodeCommand :: Double -> DecodeState -> PathCommand -> DecodeState
 decodeCommand tolerance state command = case command of
@@ -563,7 +597,7 @@ finishActive closed state
   | otherwise = state
       { subpathStart = Nothing
       , activePointsRev = []
-      , completedRev = Subpath (reverse (activePointsRev state)) closed : completedRev state
+      , completedRev = Subpath (activeScope state) (reverse (activePointsRev state)) closed : completedRev state
       }
 
 closeSubpath :: DecodeState -> DecodeState
