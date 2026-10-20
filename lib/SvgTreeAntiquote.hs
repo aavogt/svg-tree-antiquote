@@ -72,6 +72,8 @@ CZ.Cmd ::= "z";
 CZ.Cmd ::= "Z";
 COpen.Cmd ::= "{";
 CClose.Cmd ::= "}";
+COpenW.Cmd ::= "[";
+CCloseW.Cmd ::= "]";
 
 W1E.WArgE ::= E;
 W2E.WArgE ::= E "," E;
@@ -213,9 +215,11 @@ toPC = \case
   Cj args -> Left [| SJoin $(toJArgs args) |]
   COpen -> Left [| SOpen |]
   CClose -> Left [| SClose |]
+  COpenW -> Left [| SOpenW |]
+  CCloseW -> Left [| SCloseW |]
 
 -- | for svg-tree-offset:SvgTreeOffset
-data Supplement = SWidth [WArg] | Swidth [WArg] | SJoin [JArg] | Sjoin [JArg] | SOpen | SClose
+data Supplement = SWidth [WArg] | Swidth [WArg] | SJoin [JArg] | Sjoin [JArg] | SOpen | SClose | SOpenW | SCloseW
 
 data WArg = W1 Double | W2 Double Double
 
