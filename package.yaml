@@ -8,6 +8,8 @@ default-extensions:
   - LambdaCase
   - ImplicitParams
   - NoMonomorphismRestriction
+  - StandaloneDeriving
+  - DeriveLift
 
 dependencies:
   - base

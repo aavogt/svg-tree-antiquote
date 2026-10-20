@@ -12,6 +12,7 @@ build-type:     Simple
 library
   exposed-modules:
       SvgTreeAntiquote
+      SvgTreeOffset
   other-modules:
       Paths_svg_tree_antiquote
   hs-source-dirs:
@@ -22,6 +23,8 @@ library
       LambdaCase
       ImplicitParams
       NoMonomorphismRestriction
+      StandaloneDeriving
+      DeriveLift
   build-depends:
       BNFC-meta
     , base

@@ -1,4 +1,4 @@
-module SvgTreeAntiquote (parsePathCommands) where
+module SvgTreeAntiquote (parsePathCommands, parsePathCommandsSupplement, Supplement(..), WArg(..), JArg(..)) where
 
 import Data.Functor ((<&>))
 import Graphics.Svg.Types (Origin (..), PathCommand (..))
@@ -32,9 +32,10 @@ import Language.LBNF
 import Language.LBNF.Runtime (err)
 import Linear (V2 (V2))
 import Prelude hiding (exp)
-import Language.Haskell.TH.Syntax (lookupValueName)
+import Language.Haskell.TH.Syntax ( lookupValueName, Lift(lift) )
 import Data.Maybe ( catMaybes, fromMaybe )
 import Data.List ( groupBy, stripPrefix )
+import Data.Either (fromLeft)
 
 bnfc
   [lbnf|
@@ -63,9 +64,19 @@ Cv.Cmd ::= "v" [HArg];
 CV.Cmd ::= "V" [HArg];
 Cm.Cmd ::= "m" [MArg];
 CM.Cmd ::= "M" [MArg];
+Cw.Cmd ::= "w" [WArgE];
+CW.Cmd ::= "W" [WArgE];
+Cj.Cmd ::= "j" [JArg];
+CJ.Cmd ::= "J" [JArg];
 CZ.Cmd ::= "z";
 CZ.Cmd ::= "Z";
+COpen.Cmd ::= "{";
+CClose.Cmd ::= "}";
 
+W1E.WArgE ::= E;
+W2E.WArgE ::= E "," E;
+J1.JArg ::= Integer;
+J2.JArg ::= Integer "," Integer;
 AArg.AArg::= E "," E "," E "," B "," B "," MArg;
 QArg.QArg ::= MArg "," MArg;
 CArg.CArg ::= MArg "," MArg"," MArg;
@@ -76,6 +87,8 @@ separator MArg "";
 separator QArg "";
 separator CArg "";
 separator HArg "";
+separator JArg "";
+separator WArgE "";
 
 
 EDouble.E4 ::= Double;
@@ -139,8 +152,20 @@ parsePathCommands input = do
   (mangle,unmangle) <- mangleUnmangle
   let ?unmangle = unmangle
   case pCmds $ applyMangle mangle $ myLexer input of
-    Ok (Cmds s) -> listE (map toPC s)
+    Ok (Cmds s) -> listE (map (either id (error "unexpected") . toPC) s)
     Bad msg -> reportError msg >> [|()|]
+
+parsePathCommandsSupplement :: String -> ExpQ -- ^ [Either Supplement PathCommand]
+parsePathCommandsSupplement input = do
+  (mangle,unmangle) <- mangleUnmangle
+  let ?unmangle = unmangle
+  case pCmds $ applyMangle mangle $ myLexer input of
+    Ok (Cmds s) -> listE (map (liftEither . toPC) s)
+    Bad msg -> reportError msg >> [|()|]
+
+liftEither :: Either ExpQ ExpQ -> ExpQ
+liftEither (Left x) = [| Left $x |]
+liftEither (Right x) = [| Right $x |]
 
 -- | hanging indent
 applyMangle :: (Token -> Token) -> [Token] -> [Token]
@@ -157,32 +182,52 @@ mangleUnmangle :: Q (Token -> Token, String -> String)
 mangleUnmangle = do
   let prefix = "oOoOoO"
   ns <- catMaybes <$> sequence [ lookupValueName n <&> fmap (const n)
-   | n <- ["a","t","l","q","s","c","h","v","m","z"]]
+   | n <- ["a","t","l","q","s","c","h","v","m","z","w","j"]]
   return (\case
     PT p (TS n@[_] _) | n `elem` ns -> PT p (TV (prefix ++ n))
     x -> x
    , \mangled -> fromMaybe mangled $ stripPrefix prefix mangled)
 
 toPC = \case
-  Ca args -> [|EllipticalArc OriginRelative $(toAArgs args)|]
-  CA args -> [|EllipticalArc OriginAbsolute $(toAArgs args)|]
-  Ct args -> [|SmoothQuadraticBezierCurveTo OriginRelative $(toMArgs args)|]
-  CT args -> [|SmoothQuadraticBezierCurveTo OriginAbsolute $(toMArgs args)|]
-  Cl args -> [|LineTo OriginRelative $(toMArgs args)|]
-  CL args -> [|LineTo OriginAbsolute $(toMArgs args)|]
-  Cq args -> [|QuadraticBezier OriginRelative $(toQArgs args)|]
-  CQ args -> [|QuadraticBezier OriginAbsolute $(toQArgs args)|]
-  Cs args -> [|SmoothCurveTo OriginRelative $(toQArgs args)|]
-  CS args -> [|SmoothCurveTo OriginAbsolute $(toQArgs args)|]
-  Cc args -> [|CurveTo OriginRelative $(toCArgs args)|]
-  CC args -> [|CurveTo OriginAbsolute $(toCArgs args)|]
-  Ch args -> [|HorizontalTo OriginRelative $(toHArgs args)|]
-  CH args -> [|HorizontalTo OriginAbsolute $(toHArgs args)|]
-  Cv args -> [|VerticalTo OriginRelative $(toHArgs args)|]
-  CV args -> [|VerticalTo OriginAbsolute $(toHArgs args)|]
-  Cm args -> [|MoveTo OriginRelative $(toMArgs args)|]
-  CM args -> [|MoveTo OriginAbsolute $(toMArgs args)|]
-  CZ -> [|EndPath|]
+  Ca args -> Right [|EllipticalArc OriginRelative $(toAArgs args)|]
+  CA args -> Right [|EllipticalArc OriginAbsolute $(toAArgs args)|]
+  Ct args -> Right [|SmoothQuadraticBezierCurveTo OriginRelative $(toMArgs args)|]
+  CT args -> Right [|SmoothQuadraticBezierCurveTo OriginAbsolute $(toMArgs args)|]
+  Cl args -> Right [|LineTo OriginRelative $(toMArgs args)|]
+  CL args -> Right [|LineTo OriginAbsolute $(toMArgs args)|]
+  Cq args -> Right [|QuadraticBezier OriginRelative $(toQArgs args)|]
+  CQ args -> Right [|QuadraticBezier OriginAbsolute $(toQArgs args)|]
+  Cs args -> Right [|SmoothCurveTo OriginRelative $(toQArgs args)|]
+  CS args -> Right [|SmoothCurveTo OriginAbsolute $(toQArgs args)|]
+  Cc args -> Right [|CurveTo OriginRelative $(toCArgs args)|]
+  CC args -> Right [|CurveTo OriginAbsolute $(toCArgs args)|]
+  Ch args -> Right [|HorizontalTo OriginRelative $(toHArgs args)|]
+  CH args -> Right [|HorizontalTo OriginAbsolute $(toHArgs args)|]
+  Cv args -> Right [|VerticalTo OriginRelative $(toHArgs args)|]
+  CV args -> Right [|VerticalTo OriginAbsolute $(toHArgs args)|]
+  Cm args -> Right [|MoveTo OriginRelative $(toMArgs args)|]
+  CM args -> Right [|MoveTo OriginAbsolute $(toMArgs args)|]
+  CZ -> Right [|EndPath|]
+  Cw args -> Left [| Swidth $(toWArgs args) |]
+  CW args -> Left [| SWidth $(toWArgs args) |]
+  Cj args -> Left [| SJoin $(toJArgs args) |]
+  COpen -> Left [| SOpen |]
+  CClose -> Left [| SClose |]
+
+-- | for svg-tree-offset:SvgTreeOffset
+data Supplement = SWidth [WArg] | Swidth [WArg] | SJoin [JArg] | Sjoin [JArg] | SOpen | SClose
+
+data WArg = W1 Double | W2 Double Double
+
+deriving instance Lift JArg
+
+toWArgs = listE . map toWArg
+
+toWArg = \case
+  W1E e -> [| W1 $(toExp e) |]
+  W2E e f -> [| W2 $(toExp e) $(toExp f) |]
+
+toJArgs = listE . map lift
 
 toHArgs = listE . map toCoord
 
