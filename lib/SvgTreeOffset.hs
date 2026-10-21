@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 
 module SvgTreeOffset (pathOutline) where
 
@@ -38,7 +40,19 @@ pathOutline tolerance input
             [ "pathOutline: unused width arguments in a width event"
             | unusedWidths > 0
             ]
+#ifdef DEBUG_OFFSET
+          stateLog = unlines
+            [ "[SvgTreeOffset] tolerance: " ++ show tolerance
+            , "[SvgTreeOffset] width groups: " ++ show widthGroups
+            , "[SvgTreeOffset] decoded subpaths: " ++ show rawSubpaths
+            , "[SvgTreeOffset] assigned scope radii: " ++ show scopeRadii
+            , "[SvgTreeOffset] sized vertices: " ++ show sized
+            , "[SvgTreeOffset] warnings: " ++ show warnings
+            ]
+      in trace stateLog (emitWarnings warnings result)
+#else
       in emitWarnings warnings result
+#endif
   where
     (widthGroups, widthWarnings) = collectWidths input
     widths = concatMap widthGroupValues widthGroups
@@ -56,23 +70,39 @@ data WidthGroup = WidthGroup
   , widthGroupHasAnchor :: !Bool
   , widthGroupValues :: ![WidthPair]
   }
+#ifdef DEBUG_OFFSET
+  deriving (Show)
+#endif
 data WidthScopeFrame
   = PathScopeFrame !WidthPair !Int !Bool !Int
   | WidthOnlyFrame !WidthPair
 
 data VertexRadii = VertexRadii !Coord !Coord !Coord !Coord
   -- left-in, right-in, left-out, right-out
+#ifdef DEBUG_OFFSET
+  deriving (Show)
+#endif
 
 data Vertex = Vertex !RPoint !VertexRadii
+#ifdef DEBUG_OFFSET
+  deriving (Show)
+#endif
 
 data PathPoint = PathPoint !RPoint ![RPoint]
   -- The extra points are flattened samples between the previous and this point.
+#ifdef DEBUG_OFFSET
+  deriving (Show)
+#endif
 
 data Subpath = Subpath
   { subpathScope :: !Int
   , subpathPoints :: ![PathPoint]
   , subpathClosed :: !Bool
   }
+#ifdef DEBUG_OFFSET
+  deriving (Show)
+#endif
+
 
 data DecodeState = DecodeState
   { currentPoint :: !RPoint
@@ -84,9 +114,16 @@ data DecodeState = DecodeState
   , previousQuadraticControl :: !(Maybe RPoint)
   , previousCurveKind :: !CurveKind
   }
+#ifdef DEBUG_OFFSET
+  deriving (Show)
+#endif
 
 data CurveKind = NoCurve | CubicCurve | QuadraticCurve
-  deriving (Eq)
+  deriving (Eq
+#ifdef DEBUG_OFFSET
+    , Show
+#endif
+    )
 
 initialDecodeState :: DecodeState
 initialDecodeState = DecodeState
@@ -480,7 +517,18 @@ decodePath :: Double -> [Either Supplement PathCommand] -> [Subpath]
 decodePath tolerance commands =
   let (finalState, stack, _) = foldl' step (initialDecodeState, [], 1) commands
       finished = finishScopes finalState stack
+#ifdef DEBUG_OFFSET
+      subpaths = reverse (completedRev finished)
+  in trace
+      (unlines
+        [ "[SvgTreeOffset] final decode state: " ++ show finalState
+        , "[SvgTreeOffset] saved decode states: " ++ show stack
+        , "[SvgTreeOffset] decoded subpaths: " ++ show subpaths
+        ])
+      subpaths
+#else
   in reverse (completedRev finished)
+#endif
   where
     step (state, stack, nextScope) command = case command of
       Right pathCommand -> (decodeCommand tolerance state pathCommand, stack, nextScope)
