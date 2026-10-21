@@ -475,15 +475,25 @@ joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNo
     incoming = incomingRadius side vertex
     outgoing = outgoingRadius side vertex
     incomingPoint = point + incomingNormal ^* incoming
-    arcEnd = point + outgoingNormal ^* incoming
     outgoingPoint = point + outgoingNormal ^* outgoing
     turn = atan2 (cross incomingDirection outgoingDirection)
                   (dot incomingDirection outgoingDirection)
+    -- Slide the arc center along the incoming tangent to meet the outgoing offset.
     outerJoin =
-      let arc = if incoming == 0 then [] else
+      let incomingTangent = incomingDirection ^/ magnitude incomingDirection
+          normalProjection = dot incomingTangent outgoingNormal
+          centerShift = incomingTangent ^* ((outgoing - incoming) / normalProjection)
+          arcCenter = point + centerShift
+          arcStart = arcCenter + incomingNormal ^* incoming
+          arcEnd = arcCenter + outgoingNormal ^* incoming
+          arc = if incoming == 0 then [] else
             [EllipticalArc OriginAbsolute
               [(incoming, incoming, 0, False, True, arcEnd)]]
-      in (incomingPoint, arc ++ lineTo arcEnd outgoingPoint)
+          miterLimit = 4 * max incoming outgoing
+      in if abs normalProjection < 1e-12 || not (finitePoint arcCenter)
+             || magnitude centerShift > miterLimit
+           then (incomingPoint, lineTo incomingPoint outgoingPoint)
+           else (arcStart, arc ++ lineTo arcEnd outgoingPoint)
     innerJoin =
       let incomingTangent = perpendicular incomingNormal
           outgoingTangent = perpendicular outgoingNormal
