@@ -60,7 +60,6 @@ data WidthScopeFrame
   = PathScopeFrame !WidthPair !Int !Bool !Int
   | WidthOnlyFrame !WidthPair
 
-
 data VertexRadii = VertexRadii !Coord !Coord !Coord !Coord
   -- left-in, right-in, left-out, right-out
 
@@ -423,6 +422,7 @@ segmentTangent side normalSign start end
     startPoint = vertexPoint start + tangentNormal ^* startRadius
     endPoint = vertexPoint end + tangentNormal ^* endRadius
 
+joinAt :: Side -> Vertex -> RPoint -> RPoint -> RPoint -> RPoint -> [PathCommand]
 joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNormal
   | abs turn < 1e-12 = lineTo incomingPoint outgoingPoint
   | abs turn >= pi - 1e-12 = lineTo incomingPoint outgoingPoint
@@ -433,19 +433,28 @@ joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNo
     incoming = incomingRadius side vertex
     outgoing = outgoingRadius side vertex
     incomingPoint = point + incomingNormal ^* incoming
+    arcEnd = point + outgoingNormal ^* incoming
     outgoingPoint = point + outgoingNormal ^* outgoing
     turn = atan2 (cross incomingDirection outgoingDirection)
                   (dot incomingDirection outgoingDirection)
-    outerJoin
-      | incoming == 0 = lineTo incomingPoint outgoingPoint
-      | otherwise =
-          [EllipticalArc OriginAbsolute
-            [(max incoming outgoing, max incoming outgoing, 0, False, True, outgoingPoint)]]
-    innerJoin
-      | incoming == 0 = lineTo incomingPoint outgoingPoint
-      | otherwise =
-          [EllipticalArc OriginAbsolute
-            [(max incoming outgoing, max incoming outgoing, 0, False, False, outgoingPoint)]]
+    outerJoin =
+      let arc = if incoming == 0 then [] else
+            [EllipticalArc OriginAbsolute
+              [(incoming, incoming, 0, False, True, arcEnd)]]
+      in arc ++ lineTo arcEnd outgoingPoint
+    innerJoin =
+      let incomingTangent = perpendicular incomingNormal
+          outgoingTangent = perpendicular outgoingNormal
+          determinant = cross incomingTangent outgoingTangent
+          intersection =
+            incomingPoint + incomingTangent ^*
+              (cross (outgoingPoint - incomingPoint) outgoingTangent / determinant)
+          miterLimit = 4 * max incoming outgoing
+      in if abs determinant < 1e-12 || not (finitePoint intersection)
+             || magnitude (intersection - point) > miterLimit
+           then lineTo incomingPoint outgoingPoint
+           else lineTo incomingPoint intersection
+
 perpendicular :: RPoint -> RPoint
 perpendicular (V2 x y) = V2 (-y) x
 
