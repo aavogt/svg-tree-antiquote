@@ -16,17 +16,20 @@ parse [svg path commands](https://developer.mozilla.org/en-US/docs/Web/SVG/Refer
 
 ## Extensions
 
-As an extension, parsePathCommandsSupplement/pathOutline parse and interpret `wWjJ{}`-commands. These represent:
+As an extension, parsePathCommandsSupplement/pathOutline parse and interpret `wWjJ{}[]`-commands. These represent:
 
 ### offset/width
 
 `W a b,c d,e f
 L ...` sets the first vertex width to `a` the next to `b` on the left and `c` on the right
+### join
+
+TODO. Currently ends are flat (butt) and outside joins are arcs and inside joins are sharp
 
 ### branching
 
 Commands in braces make a branch. A `F` shape is `v 1 { h 1 } v 1 h 1`
 
-### join
+### temporary W
 
-TODO. Currently ends are flat (butt) and outside arc or inside
+Square brackets make a scope for `Ww` commands. `W 1 v 1 [ W 2 h 1 ] v 1 = W 1 v 1 W 2 h 1 W 1 v 1 `

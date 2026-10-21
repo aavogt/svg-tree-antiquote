@@ -15,7 +15,7 @@ all: $(VOLUME_OUTPUTS) $(STEP_OUTPUTS)
 WATCH_CASE ?= ell.hs
 watch:
 	@mkdir -p volumes
-	@bash -o pipefail -c 'GHC_ENVIRONMENT="$(GHC_ENVIRONMENT)" ghcid -r -W -c "ghci $(GHC_FLAGS) -i../lib -i$(RAPIDS_SVG) -i." $(WATCH_CASE) | tee >(sed -u -n "/^\[[0-9eE.+,-]*\]$$/p" > "volumes/$(basename $(WATCH_CASE)).out")'
+	@bash -o pipefail -c 'GHC_ENVIRONMENT="$(GHC_ENVIRONMENT)" ghcid -r -W -c "ghci $(GHC_FLAGS) -i../lib -i$(RAPIDS_SVG) -i." $(WATCH_CASE) | tee >(sed -u -n "/^\[[0-9eE.+,-]*\]$$/p" > "volumes/$(basename $(WATCH_CASE)).out") >(sed -u -n "/^\[Just .*BRepCheck_Analyzer: invalid topology or geometry; BRepAlgoAPI_Check: small edges or self-interference detected.*\]$$/p" > "volumes/$(basename $(WATCH_CASE)).err")'
 
 volumes/%.out step/%.step &: %.hs Common.hs ../lib/SvgTreeAntiquote.hs ../lib/SvgTreeOffset.hs $(RAPIDS_SVG)/Rapids/SVG.hs
 	@mkdir -p volumes step

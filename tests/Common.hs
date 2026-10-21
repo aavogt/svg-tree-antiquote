@@ -14,6 +14,7 @@ stepName = do
 write :: ExpQ -> ExpQ -> Q [Dec]
 write solid differences = [d|
   main = do
-    writeSTEPColor $stepName $solid
+    writeSTEPColor $stepName (unions $solid)
+    print (map checkSolid $solid)
     print (map volume $differences)
   |]

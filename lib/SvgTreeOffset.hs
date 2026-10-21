@@ -56,6 +56,10 @@ data WidthGroup = WidthGroup
   , widthGroupHasAnchor :: !Bool
   , widthGroupValues :: ![WidthPair]
   }
+data WidthScopeFrame
+  = PathScopeFrame !WidthPair !Int !Bool !Int
+  | WidthOnlyFrame !WidthPair
+
 
 data VertexRadii = VertexRadii !Coord !Coord !Coord !Coord
   -- left-in, right-in, left-out, right-out
@@ -116,12 +120,22 @@ collectWidths input =
       Left (Sjoin args) ->
         warnJoin args groups current penStack pending warnings vertexIndex active scope nextScope
       Left SOpen ->
-        (groups, current, (current, vertexIndex, active, scope) : penStack,
+        (groups, current, PathScopeFrame current vertexIndex active scope : penStack,
           pending, warnings, 1, True, nextScope, nextScope + 1)
       Left SClose -> case penStack of
-        (savedCurrent, savedIndex, savedActive, savedScope) : rest ->
+        PathScopeFrame savedCurrent savedIndex savedActive savedScope : rest ->
           (groups, savedCurrent, rest, pending, warnings, savedIndex, savedActive, savedScope, nextScope)
-        [] -> (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
+        _ -> (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
+      Left SOpenW ->
+        (groups, current, WidthOnlyFrame current : penStack,
+          pending, warnings, vertexIndex, active, scope, nextScope)
+      Left SCloseW -> case penStack of
+        WidthOnlyFrame savedCurrent : rest ->
+          let anchor = active && vertexIndex > 0
+              groups' = appendWidthGroup scope vertexIndex anchor [savedCurrent] groups
+          in (groups', savedCurrent, rest, pending, warnings,
+              vertexIndex, active, scope, nextScope)
+        _ -> (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
 
     warnJoin [] groups current penStack pending warnings vertexIndex active scope nextScope =
       (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
@@ -409,7 +423,6 @@ segmentTangent side normalSign start end
     startPoint = vertexPoint start + tangentNormal ^* startRadius
     endPoint = vertexPoint end + tangentNormal ^* endRadius
 
-joinAt :: Side -> Vertex -> RPoint -> RPoint -> RPoint -> RPoint -> [PathCommand]
 joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNormal
   | abs turn < 1e-12 = lineTo incomingPoint outgoingPoint
   | abs turn >= pi - 1e-12 = lineTo incomingPoint outgoingPoint
@@ -420,28 +433,19 @@ joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNo
     incoming = incomingRadius side vertex
     outgoing = outgoingRadius side vertex
     incomingPoint = point + incomingNormal ^* incoming
-    arcEnd = point + outgoingNormal ^* incoming
     outgoingPoint = point + outgoingNormal ^* outgoing
     turn = atan2 (cross incomingDirection outgoingDirection)
                   (dot incomingDirection outgoingDirection)
-    outerJoin =
-      let arc = if incoming == 0 then [] else
-            [EllipticalArc OriginAbsolute
-              [(incoming, incoming, 0, False, True, arcEnd)]]
-      in arc ++ lineTo arcEnd outgoingPoint
-    innerJoin =
-      let incomingTangent = perpendicular incomingNormal
-          outgoingTangent = perpendicular outgoingNormal
-          determinant = cross incomingTangent outgoingTangent
-          intersection =
-            incomingPoint + incomingTangent ^*
-              (cross (outgoingPoint - incomingPoint) outgoingTangent / determinant)
-          miterLimit = 4 * max incoming outgoing
-      in if abs determinant < 1e-12 || not (finitePoint intersection)
-             || magnitude (intersection - point) > miterLimit
-           then lineTo incomingPoint outgoingPoint
-           else lineTo incomingPoint intersection
-
+    outerJoin
+      | incoming == 0 = lineTo incomingPoint outgoingPoint
+      | otherwise =
+          [EllipticalArc OriginAbsolute
+            [(max incoming outgoing, max incoming outgoing, 0, False, True, outgoingPoint)]]
+    innerJoin
+      | incoming == 0 = lineTo incomingPoint outgoingPoint
+      | otherwise =
+          [EllipticalArc OriginAbsolute
+            [(max incoming outgoing, max incoming outgoing, 0, False, False, outgoingPoint)]]
 perpendicular :: RPoint -> RPoint
 perpendicular (V2 x y) = V2 (-y) x
 
