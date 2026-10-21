@@ -16,7 +16,6 @@ import SvgTreeAntiquote (parsePathCommandsSupplement)
 import SvgTreeOffset (pathOutline)
 import Waterfall.SVG (convertPathCommands)
 #endif
-
 #ifdef DEBUG_OFFSET
 svgDebug :: QuasiQuoter
 svgDebug =
@@ -39,3 +38,5 @@ write solid differences = [d|
     print (map checkSolid $solid)
     print (map volume $differences)
   |]
+
+

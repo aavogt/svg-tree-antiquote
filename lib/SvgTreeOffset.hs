@@ -160,7 +160,11 @@ collectWidths input =
           pending, warnings, 1, True, nextScope, nextScope + 1)
       Left SClose -> case penStack of
         PathScopeFrame savedCurrent savedIndex savedActive savedScope : rest ->
-          (groups, savedCurrent, rest, pending, warnings, savedIndex, savedActive, savedScope, nextScope)
+          let groups' =
+                if vertexIndex > 1 && not (any ((== scope) . widthGroupScope) groups)
+                  then appendWidthGroup scope 0 False [savedCurrent] groups
+                  else groups
+          in (groups', savedCurrent, rest, pending, warnings, savedIndex, savedActive, savedScope, nextScope)
         _ -> (groups, current, penStack, pending, warnings, vertexIndex, active, scope, nextScope)
       Left SOpenW ->
         (groups, current, WidthOnlyFrame current : penStack,
@@ -430,15 +434,16 @@ edgeCommands
   -> [PathCommand]
 edgeCommands side normalSign ((start, end), nextEdge) =
   let direction = vertexPoint end - vertexPoint start
-      (_, endPoint, incomingNormal) = segmentTangent side normalSign start end
-      segment = [LineTo OriginAbsolute [endPoint]]
-      join = case nextEdge of
-        Nothing -> []
-        Just (nextStart, nextEnd) ->
-          let nextDirection = vertexPoint nextEnd - vertexPoint nextStart
-              (_, _, outgoingNormal) = segmentTangent side normalSign nextStart nextEnd
-          in joinAt side end direction nextDirection incomingNormal outgoingNormal
-  in segment ++ join
+      (startPoint, endPoint, incomingNormal) = segmentTangent side normalSign start end
+  in case nextEdge of
+       Nothing -> [LineTo OriginAbsolute [endPoint]]
+       Just (nextStart, nextEnd) ->
+         let nextDirection = vertexPoint nextEnd - vertexPoint nextStart
+             (_, _, outgoingNormal) = segmentTangent side normalSign nextStart nextEnd
+             (joinPoint, joinCommands) =
+               joinAt side end direction nextDirection incomingNormal outgoingNormal
+         -- The miter replaces the tangent endpoint; do not retrace it.
+         in lineTo startPoint joinPoint ++ joinCommands
 
 segmentTangent :: Side -> Coord -> Vertex -> Vertex -> (RPoint, RPoint, RPoint)
 segmentTangent side normalSign start end
@@ -459,10 +464,10 @@ segmentTangent side normalSign start end
     startPoint = vertexPoint start + tangentNormal ^* startRadius
     endPoint = vertexPoint end + tangentNormal ^* endRadius
 
-joinAt :: Side -> Vertex -> RPoint -> RPoint -> RPoint -> RPoint -> [PathCommand]
+joinAt :: Side -> Vertex -> RPoint -> RPoint -> RPoint -> RPoint -> (RPoint, [PathCommand])
 joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNormal
-  | abs turn < 1e-12 = lineTo incomingPoint outgoingPoint
-  | abs turn >= pi - 1e-12 = lineTo incomingPoint outgoingPoint
+  | abs turn < 1e-12 = (incomingPoint, lineTo incomingPoint outgoingPoint)
+  | abs turn >= pi - 1e-12 = (incomingPoint, lineTo incomingPoint outgoingPoint)
   | turn > 0 = outerJoin
   | otherwise = innerJoin
   where
@@ -478,7 +483,7 @@ joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNo
       let arc = if incoming == 0 then [] else
             [EllipticalArc OriginAbsolute
               [(incoming, incoming, 0, False, True, arcEnd)]]
-      in arc ++ lineTo arcEnd outgoingPoint
+      in (incomingPoint, arc ++ lineTo arcEnd outgoingPoint)
     innerJoin =
       let incomingTangent = perpendicular incomingNormal
           outgoingTangent = perpendicular outgoingNormal
@@ -489,8 +494,8 @@ joinAt side vertex incomingDirection outgoingDirection incomingNormal outgoingNo
           miterLimit = 4 * max incoming outgoing
       in if abs determinant < 1e-12 || not (finitePoint intersection)
              || magnitude (intersection - point) > miterLimit
-           then lineTo incomingPoint outgoingPoint
-           else lineTo incomingPoint intersection
+           then (incomingPoint, lineTo incomingPoint outgoingPoint)
+           else (intersection, [])
 
 perpendicular :: RPoint -> RPoint
 perpendicular (V2 x y) = V2 (-y) x
