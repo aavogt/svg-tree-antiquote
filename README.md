@@ -1,5 +1,7 @@
 # svg-tree-antiquote
 
+MOVED into https://github.com/aavogt/rapids/tree/main/svg-tree-antiquote
+
 used by https://github.com/aavogt/rapids/tree/main/rapids-svg
 
 ```haskell
